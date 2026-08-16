@@ -4,6 +4,10 @@
 
 ---
 
+![Architecture](./architecture-diagram.png)
+
+---
+
 ## What It Does
 
 Complyra automates the AML compliance lifecycle that Indian cooperative banks must follow under PMLA 2002 and RBI/FIU-IND directives. It replaces manual spreadsheet-based transaction monitoring with a configurable rule engine, structured investigation workflows, and one-click FIU-IND regulatory XML filing.
