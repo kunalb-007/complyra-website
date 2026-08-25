@@ -4,13 +4,13 @@
 
 ---
 
-![Architecture](./architecture-diagram.png)
+![Architecture](./architecture.png)
 
 ---
 
 ## What It Does
 
-Complyra automates the AML compliance lifecycle that Indian cooperative banks must follow under PMLA 2002 and RBI/FIU-IND directives. It replaces manual spreadsheet-based transaction monitoring with a configurable rule engine, structured investigation workflows, and one-click FIU-IND regulatory XML filing.
+Complyra automates the AML compliance lifecycle for Indian cooperative banks under applicable PMLA, RBI, and FIU-IND requirements. It replaces manual spreadsheet-based transaction monitoring with configurable compliance rules, structured investigation workflows, and regulatory report generation.
 
 ---
 
@@ -20,144 +20,132 @@ The platform is a **5-layer multi-tenant SaaS** deployed as a Spring Boot backen
 
 | Layer | Technology | Responsibility |
 |---|---|---|
-| **Client** | React 18 · Ant Design · Tailwind · Vite | Module pages, regulatory filing UI, role-aware rendering |
-| **Security** | Spring Security · JWT · RBAC | Auth, tenant isolation, feature gates, audit interception |
-| **Services** | Spring Boot 3 · Java 17 | Rule engine, alert/case/STR/CTR workflows, AI narrative |
-| **Data** | PostgreSQL · JPA/Hibernate · Flyway | Transactional store, encrypted XML, append-only audit log |
-| **External** | Anthropic API · CBS · FIU-IND · SMTP | AI generation, bank data ingest, regulatory submission |
+| **Client** | React 18 · Ant Design · Tailwind · Vite | Compliance modules, reporting UI, role-aware rendering |
+| **Security** | Spring Security · JWT · RBAC | Authentication, authorization, tenant-aware access |
+| **Services** | Spring Boot 3 · Java 17 | Transaction monitoring, rule engine, alerts, cases, regulatory workflows, AI integration |
+| **Data** | PostgreSQL · JPA/Hibernate · Flyway | Transactional data, configuration, reporting, audit data |
+| **External** | AI API · CBS · FIU-IND · SMTP | AI generation, banking data integration, regulatory workflows, notifications |
 
 ---
 
 ## Core Feature Modules
 
 ### Transaction Monitoring
-- Ingests transactions via CSV/Excel upload or direct Core Banking System (CBS) API integration
-- Supports Finacle, Flexcube, and other cooperative bank CBS formats
-- Automatic field normalisation and deduplication by transaction reference
+
+- Ingests transaction data through file uploads and banking system integrations
+- Supports multiple banking data formats
+- Performs field normalisation and transaction deduplication
 
 ### AML Rule Engine
-- 8 configurable rule types with per-organisation threshold overrides
-- **Rules:** Cash Threshold, Cumulative Monthly Volume, Structuring Detection, Round Amount, High-Risk Country, PEP Transactions, Rapid Movement, Velocity Spike
-- Default thresholds aligned to RBI norms (e.g. ₹10,00,000 cash threshold)
-- Rules stored as typed JSON configs — adjustable per bank without code changes
+
+- Configurable compliance rules with organisation-specific thresholds
+- Supports transaction, customer, velocity, risk, and behavioural monitoring
+- Rules can be configured without changing the core application workflow
 
 ### Alert Management
-- Rule violations automatically generate `AmlAlert` entries with risk scores (0–100)
-- Triage queue: `OPEN → UNDER_REVIEW → CLOSED`
-- Assign to analysts, add notes, escalate to full investigation case
+
+- Automatically generates risk alerts from rule violations
+- Provides an analyst triage workflow
+- Supports assignment, investigation notes, escalation, and case creation
 
 ### Case Management
-- `AmlCase` groups multiple alerts and linked transactions
-- Cash flow analysis and suspicious indicator extraction via `CaseSummary`
-- AI-powered narrative generation (Claude claude-sonnet-4-6) — gated on Tier 2 subscription
-- Cases can be escalated directly to STR filing
+
+- Groups related alerts and transactions into investigation cases
+- Provides transaction and suspicious-activity analysis
+- Supports AI-assisted narrative generation
+- Allows cases to be escalated into regulatory reporting workflows
 
 ### STR Filing (Suspicious Transaction Reports)
-- Full maker-checker workflow: `DRAFT → PENDING_APPROVAL → APPROVED → SUBMITTED`
-- **4-eyes principle:** the analyst who submits cannot self-approve (enforced server-side)
-- AI narrative auto-populated from case summary (editable)
-- FIU-IND compliant XML generated at approval, AES-256 encrypted at rest
-- XML decrypted and streamed only on authorised download
+
+- Supports a maker-checker approval workflow
+- Separates report preparation from approval responsibilities
+- Supports AI-assisted narrative generation
+- Generates regulator-compatible XML reports
+- Provides controlled access to generated regulatory files
 
 ### CTR Filing (Currency Transaction Reports)
-- Threshold-based detection: aggregates all cash transactions per customer per day ≥ ₹10,00,000
-- Duplicate guard prevents double-filing for the same customer/date
-- Same maker-checker workflow as STR
-- Filing deadline: 15th of the month following the transaction date
-- Late-filing detection with dashboard warnings
-- FIU-IND compliant `CASHTRANSACTIONS` XML block output
+
+- Identifies qualifying cash transaction activity
+- Supports duplicate detection and filing workflows
+- Uses the same maker-checker model as other regulatory reports
+- Provides filing status and deadline monitoring
+- Generates regulator-compatible reporting output
 
 ### Customer & KYC
-- Full customer profiles: PAN, DOB, KYC status, occupation codes, address
-- Customer types: INDIVIDUAL, CORPORATE, TRUST, PARTNERSHIP
-- Risk scoring, PEP/sanction flags, account opening date tracking
+
+- Maintains customer profiles and KYC information
+- Supports multiple customer/entity types
+- Tracks customer risk and relevant compliance indicators
 
 ---
 
 ## Multi-Tenancy Design
 
-Every table row carries `organization_id`. The service layer calls `validateOrganizationAccess(orgId, user.getOrganizationId())` on every mutating operation. There is no row-level security at the database layer — isolation is enforced at the application layer consistently.
+The platform supports multiple organisations within a shared SaaS architecture with tenant-aware authentication, authorization, and data access controls.
 
-```
-Request → JWT filter → extract orgId from claims
-        → @PreAuthorize role check
-        → service.validateOrganizationAccess()
-        → all queries: WHERE organization_id = :orgId
-```
+Tenant context is propagated through the request lifecycle to ensure that organisation-level data remains isolated across application operations.
 
 ---
 
 ## Role-Based Access Control
 
-Three roles with distinct permission boundaries:
+Three primary roles provide distinct permission boundaries:
 
 | Role | Permissions |
 |---|---|
-| `SAAS_ADMIN` | Full access to all modules and all orgs |
-| `COMPLIANCE_OFFICER` | Approve/reject STR & CTR, download XML, view all |
-| `ANALYST` | Create drafts, submit for approval, triage alerts/cases |
+| `SAAS_ADMIN` | Platform administration and organisation management |
+| `COMPLIANCE_OFFICER` | Review, approve, reject, and access regulatory workflows |
+| `ANALYST` | Transaction analysis, alert triage, investigations, and report preparation |
 
-Key constraint: `COMPLIANCE_OFFICER` cannot submit-for-approval (CO = checker only). `ANALYST` cannot approve. This 4-eyes separation is enforced at both the `@PreAuthorize` annotation level and inside service methods.
+The regulatory workflow follows a **maker-checker / four-eyes principle**, separating report preparation from approval responsibilities.
 
 ---
 
 ## Feature Gate System
 
-All non-core features are gated by `@RequiresFeature(FeatureCode.XYZ)` at the controller level:
+The platform supports tenant-level feature entitlements for controlling access to optional capabilities.
 
-```java
-@RequiresFeature(FeatureCode.CTR_FILING)
-@RestController
-public class CtrReportController { ... }
-```
-
-| Feature Code | Tier | Description |
+| Feature | Tier | Description |
 |---|---|---|
 | `STR_FILING` | Tier 1 | Suspicious Transaction Report filing |
 | `CTR_FILING` | Tier 1 | Currency Transaction Report filing |
-| `AI_NARRATIVE` | Tier 2 | AI-generated STR narrative |
-| `ADVANCED_ANALYTICS` | Tier 2 | Extended reporting and trend analysis |
-| `API_ACCESS` | Tier 2 | Direct API integration with CBS |
+| `AI_NARRATIVE` | Tier 2 | AI-assisted narrative generation |
+| `ADVANCED_ANALYTICS` | Tier 2 | Extended reporting and analytics |
+| `API_ACCESS` | Tier 2 | Direct banking system integration |
 
 ---
 
-## Regulatory Filing — XML Structure
+## Regulatory Filing
 
-Both STR and CTR generate FIU-IND v2 compliant XML with the following structure:
+The platform generates regulator-compatible XML reports from approved compliance workflows.
 
-```xml
-<FIUBATCH>
-  <BATCHHEADER>
-    <ORIGCODE>PAN_OF_ENTITY</ORIGCODE>
-    <REPCODE>CTR</REPCODE>        <!-- or STR -->
-    <BATCHDATE>20260615</BATCHDATE>
-  </BATCHHEADER>
-  <CTR>
-    <REPORTHEADER> ... </REPORTHEADER>
-    <PRINCIPALOFFICER> ... </PRINCIPALOFFICER>
-    <REPORTINGENTITY> ... </REPORTINGENTITY>
-    <CUSTOMER> ... </CUSTOMER>
-    <ACCOUNT> ... </ACCOUNT>
-    <CASHTRANSACTIONS> ... </CASHTRANSACTIONS>
-  </CTR>
-</FIUBATCH>
+```text
+Investigation
+     ↓
+Report Preparation
+     ↓
+Approval
+     ↓
+Regulatory XML Generation
+     ↓
+Controlled Export
 ```
 
-XML is generated at the **approval step**, AES-256 encrypted, stored as Base64 in the database, and decrypted only when a Compliance Officer downloads it. First download transitions status `APPROVED → SUBMITTED`.
+Regulatory files are protected through controlled access and secure storage mechanisms.
 
 ---
 
 ## Audit Trail
 
-Every significant action is recorded in `audit_logs` (append-only):
+Significant compliance and administrative operations are recorded through an append-only audit mechanism.
 
-```
-AuditDomain: TRANSACTION | STR | CTR | CASE | ALERT | USER
-AuditAction: CREATE | UPDATE | DELETE | SUBMIT_FOR_APPROVAL | APPROVE | REJECT | DOWNLOAD
-```
-
-Fields: `orgId`, `userId`, `domain`, `entityType`, `entityId`, `action`, `description`, `timestamp`
-
+The audit trail supports:
+- User and organisation traceability
+- Compliance workflow tracking
+- Report lifecycle tracking
+- Investigation activity tracking
+- Administrative activity tracking
+  
 ---
 
 ## Tech Stack
@@ -177,50 +165,37 @@ Fields: `orgId`, `userId`, `domain`, `entityType`, `entityId`, `action`, `descri
 - Vite (build tooling)
 
 **AI / External**
-- Anthropic Claude API (`claude-sonnet-4-6`) — STR narrative generation
-- SMTP (JavaMailSender) — email verification and notifications
+- Anthropic Claude API (`claude-sonnet-4-6`) — AI-assisted narrative generation
+- SMTP / JavaMailSender — email verification and notifications
 - S3-compatible storage — CSV/XLSX upload and file management
 
 ---
 
-## API Reference (Key Endpoints)
+## API Reference
 
-All endpoints are prefixed with `/api/organizations/{orgId}/`.
+The application exposes REST APIs for the major compliance workflows, including:
 
 ```
 # Transactions
-POST   /transactions/upload          Upload CSV/XLSX
-GET    /transactions                  Paginated list with filters
+POST   /transactions/upload
+GET    /transactions
 
 # Alerts
-GET    /alerts                        Triage queue
-PATCH  /alerts/{id}/status            Triage action
+GET    /alerts
+PATCH  /alerts/{id}/status
 
 # Cases
-POST   /cases                         Open case from alert
-GET    /cases/{id}                    Case detail with summary
-POST   /cases/{id}/generate-narrative Claude AI narrative (Tier 2)
+POST   /cases
+GET    /cases/{id}
 
-# STR Filing
-GET    /str-reports/detect            Surface STR candidates
-POST   /str-reports                   Create draft
-POST   /str-reports/{id}/submit-for-approval
-PATCH  /str-reports/{id}/approve
-PATCH  /str-reports/{id}/reject
-GET    /str-reports/{id}/download     Stream FIU-IND XML
+# Regulatory Reports
+POST   /str-reports
+POST   /ctr-reports
 
-# CTR Filing
-GET    /ctr-reports/detect?fromDate=&toDate=   Scan cash candidates
-POST   /ctr-reports                   Create draft
-POST   /ctr-reports/{id}/submit-for-approval
-PATCH  /ctr-reports/{id}/approve
-PATCH  /ctr-reports/{id}/reject
-GET    /ctr-reports/{id}/download     Stream FIU-IND XML
-GET    /ctr-reports/stats             Dashboard aggregates
+# Configuration
+GET/PUT /rule-configurations
+GET/PUT /organization-config
 
-# Config
-GET/PUT /rule-configurations          Per-org rule thresholds
-GET/PUT /organization-config          PO details, branch config
 ```
 
 ---
